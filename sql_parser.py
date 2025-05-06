@@ -139,80 +139,98 @@ class SQLParser:
 # ================================================
 #   GRAFO DE OPERADORES
 # ================================================
-
+# Classe que representa um operador no plano de execução (ex: seleção, projeção, junção)
 class Operador:
     def __init__(self, tipo, descricao, custo=1):
-        self.tipo = tipo           
-        self.descricao = descricao    
-        self.filhos = []            
-        self.custo = custo          
+        self.tipo = tipo              
+        self.descricao = descricao   
+        self.filhos = []              
+        self.custo = custo            
 
     def __repr__(self):
+        # Representação textual do operador (útil para impressão)
         return f"{self.tipo}: {self.descricao}"
 
 
+# Classe que constrói e representa o grafo de operadores a partir de um parser de SQL
 class GrafoDeOperadores:
     def __init__(self, parser):
-        self.parser = parser
-        self.raiz = None
-        self.nos = []
-        self.alias_to_tabela = {}
-        self.criar_grafo()
+        self.parser = parser                    
+        self.raiz = None                        
+        self.nos = []                         
+        self.alias_to_tabela = {}             
+        self.criar_grafo()                     
 
     def criar_grafo(self):
+        # Criação da árvore de operadores baseada na estrutura do SQL interpretado
         dados = self.parser.parsed
+
+        # Mapeia o alias da tabela principal (FROM)
         self.alias_to_tabela = {
             dados['FROM']['alias']: dados['FROM']['table']
         }
 
+        # Mapeia os aliases de todas as tabelas usadas em JOINS
         for join in dados.get("JOINS", []):
             self.alias_to_tabela[join['alias']] = join['table']
 
+        # Cria operadores do tipo "Tabela" para cada tabela da consulta
         tabelas = {alias: Operador("Tabela", f"{alias} ({tabela})") for alias, tabela in self.alias_to_tabela.items()}
 
+        # Começa pelo operador da tabela principal
         atual = tabelas[dados['FROM']['alias']]
         self.nos.append(atual)
 
+        # Cria operadores de junção com base nos JOINS
         for join in dados.get("JOINS", []):
             tabela_join = tabelas[join['alias']]
             self.nos.append(tabela_join)
 
+            # Cria operador de junção com condição e estima custo
             join_op = Operador("Junção", f"⨝ {join['condition']}", custo=self.estimar_custo(join['condition']))
-            join_op.filhos = [atual, tabela_join]
+            join_op.filhos = [atual, tabela_join]  # Os filhos são as tabelas envolvidas na junção
             atual = join_op
             self.nos.append(join_op)
 
+        # Se houver cláusula WHERE, adiciona operador de seleção
         if "WHERE" in dados:
             selecao = Operador("Seleção", f"σ {dados['WHERE']}", custo=self.estimar_custo(dados['WHERE']))
             selecao.filhos = [atual]
             atual = selecao
             self.nos.append(selecao)
 
+        # Adiciona operador de projeção (campos selecionados)
         projecao = Operador("Projeção", f"π {', '.join(dados['SELECT'])}")
         projecao.filhos = [atual]
         atual = projecao
         self.nos.append(projecao)
 
+        # Define o último operador como raiz da árvore
         self.raiz = atual
 
     def estimar_custo(self, condicao):
+        # Estima custo de uma condição com base na quantidade de operadores lógicos
         return condicao.count("AND") + condicao.count("OR") + 1
 
     def exibir_grafo(self):
+        # Exibe graficamente a árvore de operadores
         print("\nGrafo de Operadores:")
         self._exibir_recursivo(self.raiz, nivel=0)
 
     def _exibir_recursivo(self, operador, nivel):
+        # Impressão recursiva da árvore de operadores com indentação
         print("  " * nivel + str(operador))
         for filho in operador.filhos:
             self._exibir_recursivo(filho, nivel + 1)
 
     def gerar_plano_execucao(self):
+        # Gera e exibe a ordem de execução dos operadores
         print("\nPlano de Execução (Ordem):")
         visitado = set()
         self._executar_em_ordem(self.raiz, visitado)
 
     def _executar_em_ordem(self, op, visitado):
+        # Função auxiliar para executar em pós-ordem (filhos antes do pai)
         for filho in op.filhos:
             self._executar_em_ordem(filho, visitado)
         if op not in visitado:
