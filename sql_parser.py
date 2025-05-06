@@ -137,6 +137,89 @@ class SQLParser:
         return algebra
 
 # ================================================
+#   GRAFO DE OPERADORES
+# ================================================
+
+class Operador:
+    def __init__(self, tipo, descricao, custo=1):
+        self.tipo = tipo           
+        self.descricao = descricao    
+        self.filhos = []            
+        self.custo = custo          
+
+    def __repr__(self):
+        return f"{self.tipo}: {self.descricao}"
+
+
+class GrafoDeOperadores:
+    def __init__(self, parser):
+        self.parser = parser
+        self.raiz = None
+        self.nos = []
+        self.alias_to_tabela = {}
+        self.criar_grafo()
+
+    def criar_grafo(self):
+        dados = self.parser.parsed
+        self.alias_to_tabela = {
+            dados['FROM']['alias']: dados['FROM']['table']
+        }
+
+        for join in dados.get("JOINS", []):
+            self.alias_to_tabela[join['alias']] = join['table']
+
+        tabelas = {alias: Operador("Tabela", f"{alias} ({tabela})") for alias, tabela in self.alias_to_tabela.items()}
+
+        atual = tabelas[dados['FROM']['alias']]
+        self.nos.append(atual)
+
+        for join in dados.get("JOINS", []):
+            tabela_join = tabelas[join['alias']]
+            self.nos.append(tabela_join)
+
+            join_op = Operador("Junção", f"⨝ {join['condition']}", custo=self.estimar_custo(join['condition']))
+            join_op.filhos = [atual, tabela_join]
+            atual = join_op
+            self.nos.append(join_op)
+
+        if "WHERE" in dados:
+            selecao = Operador("Seleção", f"σ {dados['WHERE']}", custo=self.estimar_custo(dados['WHERE']))
+            selecao.filhos = [atual]
+            atual = selecao
+            self.nos.append(selecao)
+
+        projecao = Operador("Projeção", f"π {', '.join(dados['SELECT'])}")
+        projecao.filhos = [atual]
+        atual = projecao
+        self.nos.append(projecao)
+
+        self.raiz = atual
+
+    def estimar_custo(self, condicao):
+        return condicao.count("AND") + condicao.count("OR") + 1
+
+    def exibir_grafo(self):
+        print("\nGrafo de Operadores:")
+        self._exibir_recursivo(self.raiz, nivel=0)
+
+    def _exibir_recursivo(self, operador, nivel):
+        print("  " * nivel + str(operador))
+        for filho in operador.filhos:
+            self._exibir_recursivo(filho, nivel + 1)
+
+    def gerar_plano_execucao(self):
+        print("\nPlano de Execução (Ordem):")
+        visitado = set()
+        self._executar_em_ordem(self.raiz, visitado)
+
+    def _executar_em_ordem(self, op, visitado):
+        for filho in op.filhos:
+            self._executar_em_ordem(filho, visitado)
+        if op not in visitado:
+            print(f"-> {op}")
+            visitado.add(op)
+
+# ================================================
 #   EXEMPLO DE USO
 # ================================================
 # Este é um exemplo de como usar o parser dentro do sistema.
@@ -161,3 +244,8 @@ print("Álgebra Relacional:", algebra)
 
 # 4. Se quiser mostrar as partes da consulta separadas:
 #    print(parser.parsed)
+
+# 5. Cria grafo de operadores e plano de execução:
+grafo = GrafoDeOperadores(parser)
+grafo.exibir_grafo()
+grafo.gerar_plano_execucao()
